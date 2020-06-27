@@ -3,6 +3,7 @@
 namespace Terraformers\Twig;
 
 use InvalidArgumentException;
+use SilverStripe\Assets\Filesystem;
 use SilverStripe\CMS\Controllers\ContentController;
 use SilverStripe\ORM\DataList;
 use SilverStripe\ORM\DataObject;
@@ -29,11 +30,9 @@ class TwigViewer extends SSViewer
     private $loader;
 
     /**
-     * @var bool
+     * @var string|null
      */
-    private static $domain_based_caching = false;
-
-    private static $dest_folder = 'cache';
+    private $cache_path;
 
     public function init(): void
     {
@@ -88,7 +87,7 @@ class TwigViewer extends SSViewer
     {
         $this->init();
 
-        $context = $this->generateContextForItem($item);
+        $context = $this->getContextFromCache($item);
 
         return $this->getTwigTemplate()
             ->render([
@@ -96,15 +95,31 @@ class TwigViewer extends SSViewer
             ]);
     }
 
-    protected function generateContextForItem(ViewableData $item): ?array
+    protected function getContextFromCache(ViewableData $item): ?array
     {
-        $cache = $this->determineCacheLocation($item);
+        $cache_path = $this->getCacheLocation($item);
 
-        if ($item instanceof ContentController) {
-            return $this->convertItemForContext($item->data());
+        if (file_exists($cache_path)) {
+            return json_decode(file_get_contents($cache_path), true);
         }
 
-        return $this->convertItemForContext($item);
+        return $this->generateContextForItem($item);
+    }
+
+    protected function generateContextForItem(ViewableData $item): ?array
+    {
+        $cache_path = $this->getCacheLocation($item);
+
+        if ($item instanceof ContentController) {
+            $item = $item->data();
+        }
+
+        $context = $this->convertItemForContext($item);
+
+        Filesystem::makeFolder(dirname($cache_path));
+        file_put_contents($cache_path, json_encode($context));
+
+        return $context;
     }
 
     /**
@@ -202,15 +217,25 @@ class TwigViewer extends SSViewer
         return $output;
     }
 
-    protected function determineCacheLocation(ViewableData $item): ?string
+    protected function getCacheLocation(ViewableData $item): ?string
     {
+        if ($this->cache_path !== null) {
+            return $this->cache_path;
+        }
+
         if ($item instanceof ContentController) {
             $location = $item->Link();
         } else {
-            $location = get_class($item);
+            $location = str_replace('\\', '/', get_class($item));
         }
 
-        return URLtoPath($location, BASE_URL, TwigViewer::config()->get('domain_based_caching'));
+        $this->cache_path = sprintf(
+            '%s%s.json',
+            $this->getDestPath(),
+            URLtoPath($location, BASE_URL, false)
+        );
+
+        return $this->cache_path;
     }
 
     /**
@@ -218,7 +243,11 @@ class TwigViewer extends SSViewer
      */
     protected function getDestPath()
     {
-        $base = defined('PUBLIC_PATH') ? PUBLIC_PATH : BASE_PATH;
-        return $base . DIRECTORY_SEPARATOR . TwigViewer::config()->get('dest_folder');
+        return sprintf(
+            '%s%s%scache/',
+            defined('PUBLIC_PATH') ? PUBLIC_PATH : BASE_PATH,
+            DIRECTORY_SEPARATOR,
+            $this->config()->get('dest_folder')
+        );
     }
 }
