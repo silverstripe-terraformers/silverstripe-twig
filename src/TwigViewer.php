@@ -9,10 +9,14 @@ use SilverStripe\View\ViewableData;
 class TwigViewer extends SSViewer
 {
     /**
-     * @param \SilverStripe\View\ViewableData $item
+     * @param ViewableData $item
      * @param null $arguments
      * @param null $inheritedScope
      * @return false|\SilverStripe\ORM\FieldType\DBHTMLText|string
+     * @throws \Throwable
+     * @throws \Twig\Error\LoaderError
+     * @throws \Twig\Error\RuntimeError
+     * @throws \Twig\Error\SyntaxError
      */
     public function process($item, $arguments = null, $inheritedScope = null)
     {
@@ -30,7 +34,7 @@ class TwigViewer extends SSViewer
             return true;
         }
 
-        // If the ViewableData is not a ContentController, then we're done here, it's not twig enabled
+        // If the ViewableData is also not a ContentController, then we're done here, it's not twig enabled
         if (!$item instanceof ContentController) {
             return false;
         }

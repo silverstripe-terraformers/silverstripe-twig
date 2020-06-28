@@ -9,6 +9,7 @@ use SilverStripe\Core\Injector\Injectable;
 use SilverStripe\ORM\DataList;
 use SilverStripe\ORM\DataObject;
 use SilverStripe\View\ViewableData;
+use Throwable;
 use Twig;
 use function SilverStripe\StaticPublishQueue\URLtoPath;
 use const BASE_PATH;
@@ -56,10 +57,23 @@ class TwigService
         $this->twig->addExtension(new Twig\Extension\DebugExtension());
     }
 
-    public function process(ViewableData $item, array $templates)
+    /**
+     * @param ViewableData $item
+     * @param array|string $templates
+     * @return false|string
+     * @throws Twig\Error\LoaderError
+     * @throws Twig\Error\RuntimeError
+     * @throws Twig\Error\SyntaxError
+     * @throws \Throwable
+     */
+    public function process(ViewableData $item, $templates)
     {
-        $this->templates = $templates;
-        $context = $this->getContextFromCache($item);
+        // Store templates locally. Convert to array if required
+        $this->templates = is_array($templates)
+            ? $templates
+            : [$templates];
+        // Get the context for this item. This can come from a cache file, or be freshly generated
+        $context = $this->getContextForItem($item);
 
         return $this->getTwigTemplate()
             ->render([
@@ -67,29 +81,46 @@ class TwigService
             ]);
     }
 
-    protected function getContextFromCache(ViewableData $item): ?array
+    protected function getContextForItem(ViewableData $item): ?array
     {
-        $cache_path = $this->getCacheLocation($item);
-
-        if (file_exists($cache_path)) {
-            return json_decode(file_get_contents($cache_path), true);
+        // When the item passed to this Service is a Controller, we instead want to use its data record
+        if ($item instanceof ContentController) {
+            $item = $item->data();
         }
 
+        // Check to see if a cache path can be determined for the item
+        $cachePath = $this->getCacheLocation($item);
+
+        // If a cache path can be determined, check for the existence of a cache file at that location
+        if ($cachePath !== null && file_exists($cachePath)) {
+            return json_decode(file_get_contents($cachePath), true);
+        }
+
+        // If there is no cached file, then we need to generate a new context
         return $this->generateContextForItem($item);
     }
 
     protected function generateContextForItem(ViewableData $item): ?array
     {
+        // Converting the item to array can be a lengthy processes depending on how many dependant object there are
+        $context = $this->convertItemToArray($item);
+        // Check to see if a cache path can be determined for the item
         $cache_path = $this->getCacheLocation($item);
 
-        if ($item instanceof ContentController) {
-            $item = $item->data();
+        // Some types of ViewableData have no form of identifier, and therefor cannot be cached, so just return the
+        // context as is
+        if ($cache_path === null) {
+            return $context;
         }
 
-        $context = $this->convertItemForContext($item);
-
-        Filesystem::makeFolder(dirname($cache_path));
-        file_put_contents($cache_path, json_encode($context));
+        // Attempt to save the context away in cache for next time
+        try {
+            Filesystem::makeFolder(dirname($cache_path));
+            file_put_contents($cache_path, json_encode($context));
+        } catch (Throwable $e) {
+            // @todo: not too sure what/where to log at the moment. Just return the context as is for now
+            return $context;
+        }
 
         return $context;
     }
@@ -103,17 +134,17 @@ class TwigService
      */
     protected function getTwigTemplate()
     {
-        $loader = $this->loader;
-
+        // Process our template stack until we find a matching twig template
         foreach ($this->templates as $value) {
-            // Includes not supported at this time
+            // @todo: includes not supported at this time
             if (is_array($value)) {
                 continue;
             }
 
             $twigTemplate = sprintf('%s.twig', $value);
 
-            if ($loader->exists($twigTemplate)) {
+            // Found it! Return it
+            if ($this->loader->exists($twigTemplate)) {
                 return $this->twig->load($twigTemplate);
             }
         }
@@ -127,18 +158,18 @@ class TwigService
      * @param mixed $item
      * @return mixed
      */
-    protected function convertItemForContext($item)
+    protected function convertItemToArray($item)
     {
         if (is_array($item)) {
-            return $this->convertIteratorForContext($item);
+            return $this->convertIteratorToArray($item);
         }
 
         if ($item instanceof DataList) {
-            return $this->convertIteratorForContext($item);
+            return $this->convertIteratorToArray($item);
         }
 
         if ($item instanceof ViewableData) {
-            return $this->convertDataObjectForContext($item);
+            return $this->convertDataObjectToArray($item);
         }
 
         return $item;
@@ -148,18 +179,18 @@ class TwigService
      * @param array|DataList $iterator
      * @return array|null
      */
-    protected function convertIteratorForContext($iterator): ?array
+    protected function convertIteratorToArray($iterator): ?array
     {
         $output = [];
 
         foreach ($iterator as $key => $item) {
-            $output[$key] = $this->convertItemForContext($item);
+            $output[$key] = $this->convertItemToArray($item);
         }
 
         return $output;
     }
 
-    protected function convertDataObjectForContext(ViewableData $obj): ?array
+    protected function convertDataObjectToArray(ViewableData $obj): ?array
     {
         $twigFields = $obj->config()->get('twig_fields');
 
@@ -183,7 +214,7 @@ class TwigService
                 continue;
             }
 
-            $output[$fieldName] = $this->convertItemForContext($value);
+            $output[$fieldName] = $this->convertItemToArray($value);
         }
 
         return $output;
@@ -195,10 +226,27 @@ class TwigService
             return $this->cache_path;
         }
 
-        if ($item instanceof ContentController) {
+        $location = null;
+
+        if ($item->hasMethod('Link')) {
+            // Check if ViewableData has a Link() method. Note: We can't just use __get('Link') because this method
+            // will end up returning ->Link, not ->Link()
             $location = $item->Link();
-        } else {
-            $location = str_replace('\\', '/', get_class($item));
+        } elseif ($item->hasField('Link')) {
+            // Next check to see if there is a Link field
+            $location = $item->Link;
+        } elseif ($item->__get('ID')) {
+            // Last chance, if the ViewableData is a DataObject (or if the ViewableData provides us with an ID through
+            // a method or field, then we can store the cache using ClassName and ID
+            $location = sprintf(
+                '%s/%s',
+                str_replace('\\', '/', get_class($item)),
+                $item->__get('ID')
+            );
+        }
+
+        if (!$location) {
+            return null;
         }
 
         $this->cache_path = sprintf(
