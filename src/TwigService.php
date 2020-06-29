@@ -10,6 +10,7 @@ use SilverStripe\ORM\ArrayList;
 use SilverStripe\ORM\DataList;
 use SilverStripe\ORM\DataObject;
 use SilverStripe\View\ArrayData;
+use SilverStripe\View\Parsers\ShortcodeParser;
 use SilverStripe\View\ViewableData;
 use Throwable;
 use Twig;
@@ -199,7 +200,11 @@ class TwigService
         }
 
         if ($item instanceof ViewableData) {
-            return $this->convertDataObjectToArray($item);
+            return $this->convertViewableDataToArray($item);
+        }
+
+        if (is_string($item)) {
+            return ShortcodeParser::get_active()->parse($item);
         }
 
         return $item;
@@ -220,7 +225,7 @@ class TwigService
         return $output;
     }
 
-    protected function convertDataObjectToArray(ViewableData $item): ?array
+    protected function convertViewableDataToArray(ViewableData $item): ?array
     {
         // Using isInDB() and not exists() because exists() can sometimes contain additional checks (like checking for
         // the binary file for a File) that we don't want to consider for this data transformation
