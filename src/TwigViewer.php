@@ -9,6 +9,11 @@ use SilverStripe\View\ViewableData;
 class TwigViewer extends SSViewer
 {
     /**
+     * @var TwigService|null
+     */
+    private $service;
+
+    /**
      * @param ViewableData $item
      * @param null $arguments
      * @param null $inheritedScope
@@ -21,13 +26,24 @@ class TwigViewer extends SSViewer
     public function process($item, $arguments = null, $inheritedScope = null)
     {
         if ($this->itemIsTwigEnabled($item)) {
-            return TwigService::create()->process($item, $this->templates);
+            return $this->getService()->process($item, $this->templates);
         }
 
         return parent::process($item, $arguments, $inheritedScope);
     }
 
-    public function itemIsTwigEnabled(ViewableData $item): bool
+    protected function getService(): TwigService
+    {
+        if ($this->service !== null) {
+            return $this->service;
+        }
+
+        $this->service = TwigService::create();
+
+        return $this->service;
+    }
+
+    protected function itemIsTwigEnabled(ViewableData $item): bool
     {
         // Current ViewableData is itself twig enabled, so we're good to go
         if ($item->config()->get('twig_enabled')) {

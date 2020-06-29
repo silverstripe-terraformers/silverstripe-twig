@@ -6,12 +6,13 @@ use InvalidArgumentException;
 use SilverStripe\Assets\Filesystem;
 use SilverStripe\CMS\Controllers\ContentController;
 use SilverStripe\Core\Injector\Injectable;
+use SilverStripe\ORM\ArrayList;
 use SilverStripe\ORM\DataList;
 use SilverStripe\ORM\DataObject;
+use SilverStripe\View\ArrayData;
 use SilverStripe\View\ViewableData;
 use Throwable;
 use Twig;
-use function SilverStripe\StaticPublishQueue\URLtoPath;
 use const BASE_PATH;
 use const BASE_URL;
 use const DIRECTORY_SEPARATOR;
@@ -41,6 +42,21 @@ class TwigService
      * @var string|null
      */
     private $cache_path;
+
+    /**
+     * @var array
+     */
+    private $local_cache;
+
+    /**
+     * Temporary thing while we're developing... Saves you from having to remove the cache file each time you change
+     * something.
+     *
+     * @todo remove later on (or move to config if we decide to keep it)
+     *
+     * @var bool
+     */
+    private $use_local_cache = true;
 
     public function __construct()
     {
@@ -88,12 +104,18 @@ class TwigService
             $item = $item->data();
         }
 
-        // Check to see if a cache path can be determined for the item
-        $cachePath = $this->getCacheLocation($item);
+        if ($this->use_local_cache) {
+            if ($this->local_cache !== null) {
+                return $this->local_cache;
+            }
+        } else {
+            // Check to see if a cache path can be determined for the item
+            $cachePath = $this->getCacheLocation($item);
 
-        // If a cache path can be determined, check for the existence of a cache file at that location
-        if ($cachePath !== null && file_exists($cachePath)) {
-            return json_decode(file_get_contents($cachePath), true);
+            // If a cache path can be determined, check for the existence of a cache file at that location
+            if ($cachePath !== null && file_exists($cachePath)) {
+                return json_decode(file_get_contents($cachePath), true);
+            }
         }
 
         // If there is no cached file, then we need to generate a new context
@@ -113,13 +135,17 @@ class TwigService
             return $context;
         }
 
-        // Attempt to save the context away in cache for next time
-        try {
-            Filesystem::makeFolder(dirname($cache_path));
-            file_put_contents($cache_path, json_encode($context));
-        } catch (Throwable $e) {
-            // @todo: not too sure what/where to log at the moment. Just return the context as is for now
-            return $context;
+        if ($this->use_local_cache) {
+            $this->local_cache = $context;
+        } else {
+            // Attempt to save the context away in cache for next time
+            try {
+                Filesystem::makeFolder(dirname($cache_path));
+                file_put_contents($cache_path, json_encode($context));
+            } catch (Throwable $e) {
+                // @todo: not too sure what/where to log at the moment. Just return the context as is for now
+                return $context;
+            }
         }
 
         return $context;
@@ -168,6 +194,10 @@ class TwigService
             return $this->convertIteratorToArray($item);
         }
 
+        if ($item instanceof ArrayList) {
+            return $this->convertIteratorToArray($item);
+        }
+
         if ($item instanceof ViewableData) {
             return $this->convertDataObjectToArray($item);
         }
@@ -190,9 +220,22 @@ class TwigService
         return $output;
     }
 
-    protected function convertDataObjectToArray(ViewableData $obj): ?array
+    protected function convertDataObjectToArray(ViewableData $item): ?array
     {
-        $twigFields = $obj->config()->get('twig_fields');
+        // Using isInDB() and not exists() because exists() can sometimes contain additional checks (like checking for
+        // the binary file for a File) that we don't want to consider for this data transformation
+        if ($item instanceof DataObject && !$item->isInDB()) {
+            return null;
+        }
+
+        if ($item instanceof ArrayData) {
+            // You can't define twig_fields for a DataList that was dynamically created, so we'll just grab all of the
+            // fields that it contains
+            $twigFields = array_keys($item->toMap());
+        } else {
+            // Any other sort of ViewableData should have twig_fields defined
+            $twigFields = $item->config()->get('twig_fields');
+        }
 
         // Sanity check
         if (!$twigFields) {
@@ -201,20 +244,23 @@ class TwigService
 
         $output = [];
 
-        foreach ($twigFields as $value) {
-            $fieldName = $value;
+        foreach ($twigFields as $alias => $fieldName) {
+            // We can optionally write twig_fields as AliasFieldName => getFieldValue
+            if (!is_string($alias)) {
+                $alias = $fieldName;
+            }
 
-            if ($obj instanceof DataObject) {
-                $value = $obj->relField($fieldName);
+            if ($item instanceof DataObject) {
+                $value = $item->relField($fieldName);
             } else {
-                $value = $obj->__get($fieldName);
+                $value = $item->__get($fieldName);
             }
 
             if (!$value) {
                 continue;
             }
 
-            $output[$fieldName] = $this->convertItemToArray($value);
+            $output[$alias] = $this->convertItemToArray($value);
         }
 
         return $output;
