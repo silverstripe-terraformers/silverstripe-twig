@@ -5,6 +5,7 @@ namespace Terraformers\Twig;
 use InvalidArgumentException;
 use SilverStripe\Assets\Filesystem;
 use SilverStripe\CMS\Controllers\ContentController;
+use SilverStripe\Core\Config\Configurable;
 use SilverStripe\Core\Injector\Injectable;
 use SilverStripe\ORM\ArrayList;
 use SilverStripe\ORM\DataList;
@@ -23,6 +24,7 @@ use const THEMES_PATH;
 class TwigService
 {
     use Injectable;
+    use Configurable;
 
     /**
      * @var Twig\Environment|null
@@ -43,21 +45,6 @@ class TwigService
      * @var string|null
      */
     private $cache_path;
-
-    /**
-     * @var array
-     */
-    private $local_cache;
-
-    /**
-     * Temporary thing while we're developing... Saves you from having to remove the cache file each time you change
-     * something.
-     *
-     * @todo remove later on (or move to config if we decide to keep it)
-     *
-     * @var bool
-     */
-    private $use_local_cache = true;
 
     public function __construct()
     {
@@ -105,18 +92,12 @@ class TwigService
             $item = $item->data();
         }
 
-        if ($this->use_local_cache) {
-            if ($this->local_cache !== null) {
-                return $this->local_cache;
-            }
-        } else {
-            // Check to see if a cache path can be determined for the item
-            $cachePath = $this->getCacheLocation($item);
+        // Check to see if a cache path can be determined for the item
+        $cachePath = $this->getCacheLocation($item);
 
-            // If a cache path can be determined, check for the existence of a cache file at that location
-            if ($cachePath !== null && file_exists($cachePath)) {
-                return json_decode(file_get_contents($cachePath), true);
-            }
+        // If a cache path can be determined, check for the existence of a cache file at that location
+        if ($cachePath !== null && file_exists($cachePath)) {
+            return json_decode(file_get_contents($cachePath), true);
         }
 
         // If there is no cached file, then we need to generate a new context
@@ -127,6 +108,7 @@ class TwigService
     {
         // Converting the item to array can be a lengthy processes depending on how many dependant object there are
         $context = $this->convertItemToArray($item);
+
         // Check to see if a cache path can be determined for the item
         $cache_path = $this->getCacheLocation($item);
 
@@ -136,17 +118,13 @@ class TwigService
             return $context;
         }
 
-        if ($this->use_local_cache) {
-            $this->local_cache = $context;
-        } else {
-            // Attempt to save the context away in cache for next time
-            try {
-                Filesystem::makeFolder(dirname($cache_path));
-                file_put_contents($cache_path, json_encode($context));
-            } catch (Throwable $e) {
-                // @todo: not too sure what/where to log at the moment. Just return the context as is for now
-                return $context;
-            }
+        // Attempt to save the context away in cache for next time
+        try {
+            Filesystem::makeFolder(dirname($cache_path));
+            file_put_contents($cache_path, json_encode($context));
+        } catch (Throwable $e) {
+            // @todo: not too sure what/where to log at the moment. Just return the context as is for now
+            return $context;
         }
 
         return $context;
