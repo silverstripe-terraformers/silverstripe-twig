@@ -47,6 +47,15 @@ return function($cacheDir)
         return false;
     }
 
+    $context = $cache['context']
+        ?? null;
+    $templates = $cache['templates']
+        ?? null;
+
+    if (!$context || !$templates) {
+        return false;
+    }
+
     $etag = '"' . md5_file($cachePath) . '"';
 
     if (!empty($_SERVER['HTTP_IF_NONE_MATCH']) && $_SERVER['HTTP_IF_NONE_MATCH'] == $etag) {
