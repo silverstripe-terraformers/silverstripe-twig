@@ -3,6 +3,7 @@
 namespace Terraformers\Twig;
 
 use SilverStripe\CMS\Controllers\ContentController;
+use SilverStripe\Core\Injector\Injector;
 use SilverStripe\View\SSViewer;
 use SilverStripe\View\ViewableData;
 
@@ -11,7 +12,17 @@ class TwigViewer extends SSViewer
     /**
      * @var TwigService|null
      */
-    private $service;
+    private $twigService;
+
+    /**
+     * @var CacheService
+     */
+    private $cacheService;
+
+    /**
+     * @var DataService
+     */
+    private $dataService;
 
     /**
      * @param ViewableData $item
@@ -26,21 +37,74 @@ class TwigViewer extends SSViewer
     public function process($item, $arguments = null, $inheritedScope = null)
     {
         if ($this->itemIsTwigEnabled($item)) {
-            return $this->getService()->process($item, $this->templates);
+            return $this->renderTwig($item, $this->templates);
         }
 
         return parent::process($item, $arguments, $inheritedScope);
     }
 
-    protected function getService(): TwigService
+    /**
+     * @param ViewableData $item
+     * @param array|string $templates
+     * @return false|string
+     * @throws \Throwable
+     * @throws \Twig\Error\LoaderError
+     * @throws \Twig\Error\RuntimeError
+     * @throws \Twig\Error\SyntaxError
+     */
+    protected function renderTwig(ViewableData $item, $templates)
     {
-        if ($this->service !== null) {
-            return $this->service;
+        $cachePath = $this->getCacheService()->getCachePathByViewableData($item);
+        $cache = $this->getCacheService()->getCacheByPath($cachePath);
+
+        if ($cache === null) {
+            $context = $this->getDataService()->getContextForItem($item);
+
+            $cache = [
+                'context' => $context,
+                'templates' => $templates,
+            ];
+
+            $this->getCacheService()->saveCache($cache, $cachePath);
         }
 
-        $this->service = TwigService::create();
+        $context = $cache['context'];
+        $templates = $cache['templates'];
 
-        return $this->service;
+        return $this->getTwigService()->process($context, $templates);
+    }
+
+    protected function getTwigService(): TwigService
+    {
+        if ($this->twigService !== null) {
+            return $this->twigService;
+        }
+
+        $this->twigService = Injector::inst()->create(TwigService::class);
+
+        return $this->twigService;
+    }
+
+    protected function getCacheService(): CacheService
+    {
+        if ($this->cacheService !== null) {
+            return $this->cacheService;
+        }
+
+        $this->cacheService = Injector::inst()->create(CacheService::class);
+
+        return $this->cacheService;
+    }
+
+    protected function getDataService(): DataService
+    {
+        if ($this->dataService !== null) {
+            return $this->dataService;
+        }
+
+        $this->dataService = Injector::inst()->create(DataService::class);
+
+        return $this->dataService;
     }
 
     protected function itemIsTwigEnabled(ViewableData $item): bool
