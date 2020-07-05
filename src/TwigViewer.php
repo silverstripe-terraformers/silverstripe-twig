@@ -114,12 +114,13 @@ class TwigViewer extends SSViewer
             return true;
         }
 
-        // If the ViewableData is also not a ContentController, then we're done here, it's not twig enabled
-        if (!$item instanceof ContentController) {
-            return false;
+        // If the ViewableData is a ContentController, then let's also check the record attached to it
+        if ($item instanceof ContentController) {
+            // Check whether the data record on the ContentController is twig enabled
+            return $item->data()->config()->get('twig_enabled') ?? false;
         }
 
-        // Check whether the data record on the ContentController is twig enabled
-        return $item->data()->config()->get('twig_enabled');
+        // Neither the controller or record were twig enabled
+        return false;
     }
 }
