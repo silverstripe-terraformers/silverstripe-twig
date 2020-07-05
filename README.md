@@ -12,11 +12,8 @@ as our desires change.
 
 ## Missing
 
-This is incredibly early alpha, so you're going to have to bear with us. Atm there is no separation between the caching
-logic and twig rendering - you're gonna get them both! Which we fully understand is not ideal if you just want Twig for
-Twig's sake. Configuration/etc will be coming soon(ish)!
-
-Also missing is the mechanism to clear these caches.
+This is incredibly early alpha, so you're going to have to bear with us. Currenly there is no mechanism for clearing
+caches (if you have it enabled). We'll look to add some sort of extension for this mechanism as soon as possible.
 
 ## Installation
 
@@ -45,12 +42,12 @@ you will need to add/uncomment the `After: '#debugbar'` statement.
 In order to start using Twig templates for your `Controllers`/`Models`, you will need to let the `Viewer` know which
 have been enabled. You can do this by adding the config field `twig_enabled` to either your `Controller` or `Model`.
 
+The below example would enable twig rendering for all of your Page types.
+
 Adding config to your PHP class:
 
 ```php
-namespace App\Page;
-
-class MyPage extends Page
+class Page extends SiteTree
 {
     private static $twig_enabled = true;
 }
@@ -59,7 +56,7 @@ class MyPage extends Page
 Adding config through yml:
 
 ```yaml
-App\Page\MyPage:
+Page:
   twig_enabled: true
 ```
 
@@ -98,6 +95,13 @@ class MyPage extends Page
 Adding config through yml:
 
 ```yaml
+# This config on DataObject means that every record exported will have (at a minimum) its ID and ClassName exported 
+SilverStripe\ORM\DataObject:
+  twig_fields:
+    - ClassName
+    - ID
+
+# File (which also includes Image) to export the relevant fields
 SilverStripe\Assets\File:
   twig_fields:
     - AbsoluteLink
@@ -133,18 +137,42 @@ We'll go looking for files matching the following (and in this order), and we'll
 
 ## Caching
 
-In order to speed things up for subsequent requests, we create cached data files that store the json blob for any given
-request. These are stored in `public/cache`.
+In order to speed things up for subsequent requests, we can create cached data files that store the json blob for any
+given request. These are stored in `public/cache`.
 
-Yup, sorry, this isn't configurable atm. You're gonna get these cache files, and they're gonna live in that
-directory... We're still trying to get through all of the early requirements... Anyway...
+By default, this caching mechanism is disabled, but you can enable it for particular models/controllers by adding the
+`twig_cache_enabled` config.
+
+The examle below would essentially enable caching for all of your Page types.
+
+Adding config to your PHP class:
+
+```php
+namespace App\Page;
+
+class Page extends SiteTree
+{
+    private static $twig_cache_enabled = true;
+}
+``` 
+
+Adding config through yml:
+
+```yaml
+Page:
+  twig_cache_enabled:
+```
+
+**Please note**: There is no "partial cache" mechanism at this time. You cannot have only part of your request data
+being cached, while other parts of it are dynamic. You should look at this as a similar cache mechanic as static
+publisher. Where you require dynamic content, you may need to consider using XHR to populate that content.
 
 The goal (soon) will be to also provide a mechanism for you to clear these caches (probably on page publish/etc).
 
 ## Handling requests
 
-When we have the data for a request cached, there is no need to spin up the framework to render the template - instead
-we can instead just spin up Twig, and feed it what it needs to generate our page.
+When/if we have the data for a request cached, there is no need to spin up the framework to render the template - 
+instead we can just spin up Twig, and feed it what it needs to generate our page.
 
 To set this up, you'll need to add this to your `public/index.php` file:
 

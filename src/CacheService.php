@@ -11,6 +11,20 @@ use const PUBLIC_PATH;
 
 class CacheService
 {
+    /**
+     * This is *not* configurable due to the fact that we want to keep this class free from as much bloat as possible
+     * (since we use it in our "let's not spin up framework" cached rendering process). If you wish to update the
+     * directory that this is saved in, we recommend you subclass and update that way.
+     *
+     * Note: You will *not* need to update usages of this class in TwigViewer, as that already instantiates the class
+     * using Injector, however:
+     * You *will* need to create your own twigrequesthandler.php include with the updated class name (as this does not
+     * use Injector - as that increases bloat).
+     *
+     * @var string
+     */
+    protected $cache_directory = 'cache';
+
     public function saveCache(array $context, string $savePath): void
     {
         Filesystem::makeFolder(dirname($savePath));
@@ -91,9 +105,10 @@ class CacheService
     protected function getDestPath()
     {
         return sprintf(
-            '%s%scache/',
+            '%s%s%s/',
             defined('PUBLIC_PATH') ? PUBLIC_PATH : BASE_PATH,
-            DIRECTORY_SEPARATOR
+            DIRECTORY_SEPARATOR,
+            $this->cache_directory
         );
     }
 

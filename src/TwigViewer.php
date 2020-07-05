@@ -54,6 +54,12 @@ class TwigViewer extends SSViewer
      */
     protected function renderTwig(ViewableData $item, $templates)
     {
+        if (!$this->itemIsCacheEnabled($item)) {
+            $context = $this->getDataService()->getContextForItem($item);
+
+            return $this->getTwigService()->process($context, $templates);
+        }
+
         $cachePath = $this->getCacheService()->getCachePathByViewableData($item);
         $cache = $this->getCacheService()->getCacheByPath($cachePath);
 
@@ -121,6 +127,23 @@ class TwigViewer extends SSViewer
         }
 
         // Neither the controller or record were twig enabled
+        return false;
+    }
+
+    protected function itemIsCacheEnabled(ViewableData $item): bool
+    {
+        // Current ViewableData is itself has twig cache enabled, so we're good to go
+        if ($item->config()->get('twig_cache_enabled')) {
+            return true;
+        }
+
+        // If the ViewableData is a ContentController, then let's also check the record attached to it
+        if ($item instanceof ContentController) {
+            // Check whether the data record on the ContentController has twig cache enabled
+            return $item->data()->config()->get('twig_cache_enabled') ?? false;
+        }
+
+        // Neither the controller or record were twig cache enabled
         return false;
     }
 }
